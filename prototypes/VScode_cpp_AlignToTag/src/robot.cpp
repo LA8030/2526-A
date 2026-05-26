@@ -52,10 +52,20 @@ void vexcodeInit(void)
 
 void update50hz()
 {
+  // Constant value in range 0.0 to 1.0, determines how strongly the correction is applied, like spring constant, soft or stiff spring
+  //>>> Try changing this.  If too small it drives past the tag, what happens if this is too large?
+ const double Pcontrol = 0.2;                      
+   
+  // At max detection range, (about 24"), AprilTag width is 6
+  // At min range the tag almost fills the view - any closer it doesn't detect, width = 100
+  // width = 70 is about 2" from the camera, allows a little overshoot on approach without losing the tag
+  const int nearTagWidth = 70;
+
   // For Arcade drive, Right Joystick (Axis 2) controls forward/backward, Right Joystick (Axis 1) turns
   int drivePower = Controller1.Axis2.position(); // Range -100 to +100
   int turnPower = Controller1.Axis1.position();
 
+  int pctOfVisibleDistanceToTag = -1;
   bool isDrivingForward = (drivePower > 0);
 
   if (isDrivingForward && Controller1.ButtonA.pressing())
@@ -98,8 +108,13 @@ void update50hz()
             // Print detection data to the VEXcode Terminal
             printf("Found Tag 1! Screen X: %d, Screen Y: %d, Width: %d\n", centerX, centerY, width);
 
-            bool isCloseToTag = (width > 110);
-            if (isCloseToTag)
+            pctOfVisibleDistanceToTag = (100 * (nearTagWidth - width)) / nearTagWidth;
+            if(pctOfVisibleDistanceToTag < 0) 
+            {
+              pctOfVisibleDistanceToTag = 0;  // Range zero at close distance, approx 74 at max detection distance
+            }
+
+            if (pctOfVisibleDistanceToTag == 0)
             {
               // Close to tag -> STOP
               drivePower = 0.0;
@@ -107,8 +122,12 @@ void update50hz()
             }
             else
             {
+              // If don't slow down on approach to the tag, inertia will carry the robot close to the point it stops detecting the tag
+              // and then it will just keep driving forward
+              drivePower *= pctOfVisibleDistanceToTag;
+              drivePower /= 100;
+
               int errorX = (100 * (centerX - 160)) / 160; // Range -100 far left to +100 far right
-              double Pcontrol = 0.4;                      // Constant value in range 0.0 to 1.0, determines how strongly the correction is applied
 
               // PROPORTIONAL control means more error --> stronger correction.
               // Like a spring pulling towrd the desired path
@@ -121,7 +140,7 @@ void update50hz()
       }
     }
   }
-  printf("Power FR: %d   LR: %d\n", drivePower, turnPower);
+  printf("Power FR: %d   LR: %d  %i  %i\n", drivePower, turnPower, isDrivingForward, pctOfVisibleDistanceToTag);
 
   Drivetrain.arcade(drivePower, turnPower);
 }
