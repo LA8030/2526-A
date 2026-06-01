@@ -33,7 +33,7 @@ pros::MotorGroup left_motors({left_motor});
 pros::MotorGroup right_motors({right_motor});
 
 // Define the Inertial/Gyro Sensor
-pros::Imu inertial_sensor(9); // Gyro plugged into Smart Port 9
+pros::Imu inertial_sensor(12); // Gyro plugged into Smart Port 12
 
 // ==========================================
 // 2. LEMLIB DRIVETRAIN PROFILE
@@ -144,27 +144,20 @@ void resetLog() {
 }
 
 bool isImuValid() {
-  // Check if physically connected
-  if (static_cast<int>(inertial_sensor.get_status()) ==
-      pros::E_IMU_STATUS_ERROR) {
-    std::cout << "IMU not connected or errored\n";
-    return false;
-  }
+    // Check if still calibrating
+    if (inertial_sensor.is_calibrating()) {
+        printf("IMU still calibrating\n");
+        return false;
+    }
 
-  // Check if still calibrating
-  if (inertial_sensor.is_calibrating()) {
-    std::cout << "IMU still calibrating\n";
-    return false;
-  }
+    // Check heading is a real number (returns PROS_ERR_F if disconnected)
+    double heading = inertial_sensor.get_heading();
+    if (heading == PROS_ERR_F) {
+        printf("IMU returning invalid data\n");
+        return false;
+    }
 
-  // Check heading is a real number (returns PROS_ERR_F if disconnected)
-  double heading = inertial_sensor.get_heading();
-  if (heading == PROS_ERR_F) {
-    std::cout << "IMU returning invalid data\n";
-    return false;
-  }
-
-  return true;
+    return true;
 }
 
 // Compact timestamp in text form to include in log output
@@ -263,7 +256,16 @@ void initialize() {
   pros::lcd::initialize();
 
   // Initialize the gyro sensor
-  inertial_sensor.reset();
+  int initCount = 500; // Time out after 10 seconds
+  while (inertial_sensor.is_calibrating()) {
+    pros::delay(20);
+    initCount--;
+    if (initCount <= 0) {
+      printf("IMU calibration timed out\n");
+      break;
+    }
+  }
+  pros::delay(100); // small extra settle time after calibration reports done
 
   // Initialize the chassis (important for odometry to work correctly)
   chassis.calibrate();
@@ -364,6 +366,17 @@ void opcontrol() {
 
       left_motors.move(dir - turn);  // Sets left motor voltage
       right_motors.move(dir + turn); // Sets right motor voltage
+
+      if (turn < -5) { // Push stick to the left for testing motion blur
+
+        pros::imu_gyro_s_t gyro = inertial_sensor.get_gyro_rate();
+        double currentAngularVelocity = gyro.z;
+        double tag_heading = getTagHeading(tagIDToTrack);
+
+        writeLog(getTimestamp() + ",TURN," + "," +
+                 std::to_string(currentAngularVelocity) + "," +
+                 std::to_string(tag_heading) + "\n");
+      }
     }
 
     pros::delay(20); // Run for 20 ms then update
