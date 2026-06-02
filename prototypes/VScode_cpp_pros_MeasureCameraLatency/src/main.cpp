@@ -9,6 +9,8 @@
 
 #include "pros/abstract_motor.hpp"
 #include <string>
+#include <cmath>
+
 
 // Note:  If you see a lot of blue squigglys in the code below, they indicate
 //        failure to pass spell check
@@ -78,7 +80,7 @@ lemlib::OdomSensors sensors{
     &inertial_sensor // Pass the gyro pointer for accurate rotational data
 };
 
-pros::v5::AIVision myAIVision5(5);
+pros::AIVision myAIVision5(5);
 
 // Create the unified LemLib Chassis object
 lemlib::Chassis chassis(drivetrain, lateral_controller, angular_controller,
@@ -144,20 +146,22 @@ void resetLog() {
 }
 
 bool isImuValid() {
-    // Check if still calibrating
-    if (inertial_sensor.is_calibrating()) {
-        printf("IMU still calibrating\n");
-        return false;
-    }
+  // Check if still calibrating
+  if (inertial_sensor.is_calibrating()) {
+    printf("IMU still calibrating\n");
+    writeLog("IMU still calibrating");
+    return false;
+  }
 
-    // Check heading is a real number (returns PROS_ERR_F if disconnected)
-    double heading = inertial_sensor.get_heading();
-    if (heading == PROS_ERR_F) {
-        printf("IMU returning invalid data\n");
-        return false;
-    }
+  // Check heading is a real number (returns PROS_ERR_F if disconnected)
+  double heading = inertial_sensor.get_heading();
+  if (heading == PROS_ERR_F) {
+    printf("IMU returning invalid data\n");
+    writeLog("IMU returning invalid data");
+    return false;
+  }
 
-    return true;
+  return true;
 }
 
 // Compact timestamp in text form to include in log output
@@ -176,24 +180,67 @@ std::string getTimestamp() {
   return oss.str(); // e.g. "153045" = 15:30:45
 }
 
-double getTagHeading(int id) {
+bool isAprilTag(pros::AIVision::Object obj) {
+  // See Issue 790 at https://github.com/purduesigbots/pros/issues/790
+  // Object type reported for AprilTag object is currently "8", but should be
+  // pros::AivisionObjectType::tag, which is currently defined as "4" in the
+  // API for PRO4 library 4.2.2.  This may be fixed in a future API update, but
+  // for now we will check if the type is 8 to identify tags.
+  return obj.type == 8;
+}
+
+bool isTagID(pros::AIVision::Object obj, int target_id) {
+  if (!isAprilTag(obj)) {
+    return false;
+  }
+
+  // See Issue 790 at https://github.com/purduesigbots/pros/issues/790
+  // Zero based Object ID reported by the library is "one off", from one based
+  // AprilTag IDs.  For example Tag ID 1 is reported as "0" in the object list
+  return (obj.id == (target_id - 1));
+}
+
+double getAngleToTag(pros::AIVision::Object obj) {
+  // The AI Vision Sensor has 320x240 resolution, center at pixel 160.
+  // FOV can be measured empirically or estimated (~70 degrees horizontal
+  // is commonly reported for this sensor family — but calibrate yourself).
+  //
+  // For a pinhole camera model:
+  //   angle = atan2(pixel_offset, focal_length_in_pixels)
+  //
+  // focal_length_pixels = (image_width / 2) / tan(hFOV / 2)
+  // With hFOV = 70 deg: focal_length_pixels = 160 / tan(35 deg) ≈ 228.5
+
+  const double HFOV_DEG = 70.0; // <-- tune this by measurement
+  const int IMAGE_WIDTH = 320;
+
+  double focalLengthPixels =
+      (IMAGE_WIDTH / 2.0) / std::tan(HFOV_DEG * M_PI / 360.0);
+
+  // Compute tag center X from the four corners
+  double cx = (obj.object.tag.x0 + obj.object.tag.x1 + obj.object.tag.x2 +
+               obj.object.tag.x3) /
+              4.0;
+
+  double pixel_offset = cx - (IMAGE_WIDTH / 2.0); // signed, pixels from center
+
+  // Returns degrees, positive = tag is to the right of center
+  return std::atan2(pixel_offset, focalLengthPixels) * 180.0 / M_PI;
+}
+
+double getTagHeading(int target_id) {
   double tagHeading = INVALID_HEADING;
-  std::vector<pros::AIVision::Object> objects = myAIVision5.get_all_objects();
 
-  for (auto &obj : objects) {
-    if ((pros::AIVision::is_type(obj, pros::AivisionDetectType::tag)) &&
-        (obj.id == id)) {
+  int count = myAIVision5.get_object_count();
+  if ((count > 0) && (count != PROS_ERR)) {
 
-      // Calculate angle from top edge of tag (corners 0->1)
-      double dx = obj.object.tag.x1 - obj.object.tag.x0;
-      double dy = obj.object.tag.y1 - obj.object.tag.y0;
-      tagHeading = std::atan2(dy, dx) * (180.0 / M_PI);
+    for (int i = 0; i < count; i++) {
+      pros::AIVision::Object obj = myAIVision5.get_object(i);
 
-      // Normalize to 0-359
-      if (tagHeading < 0) {
-        tagHeading += 360.0;
+      if (isTagID(obj, tagIDToTrack)) {
+        tagHeading = getAngleToTag(obj);
+        break;
       }
-      break;
     }
   }
   return tagHeading;
@@ -201,7 +248,7 @@ double getTagHeading(int id) {
 
 std::string prepareForTest() {
   isReadyToTest = false;
-  std::string errRet = "READY TO TEST";
+  std::string errRet = " ";
 
   double tagHeading = getTagHeading(tagIDToTrack);
   if (tagHeading == INVALID_HEADING) {
@@ -218,8 +265,8 @@ std::string prepareForTest() {
     }
   }
 
-  if (!isReadyToTest) {
-    errRet = "IMU not ready. Check connections and calibration.";
+  if (isReadyToTest) {
+    errRet = "READY TO TEST";
   }
 
   return errRet;
@@ -255,29 +302,38 @@ void runTest() {
 void initialize() {
   pros::lcd::initialize();
 
-  // Initialize the gyro sensor
-  int initCount = 500; // Time out after 10 seconds
+  testData.clear(); // Clear any old log data in memory
+
+  myAIVision5.reset();   // DO NOT call reset!  
+  //                           DO NOT enable tag detection!
+   // Use the VEXcode utility to set the camera up and then power cycle 
+  // the brain to ensure the camera is fully booted before the program starts.
+  // Calling reset() at this point will set the camera back to default settings, 
+  // and beieve me, I have tried every which way unsuccessfully to set the camera 
+  // up from here in code.  Better to rely on using VEXcode to enable tag detection.
+
+  // 2. Let the IMU calibrate (this long delay gives the camera plenty of time to reboot)
+  pros::lcd::set_text(2, "DO NOT MOVE THE ROBOT DURING GYRO CALIBRATION");
+  inertial_sensor.reset();
+  int initCount = 500; 
   while (inertial_sensor.is_calibrating()) {
     pros::delay(20);
     initCount--;
     if (initCount <= 0) {
       printf("IMU calibration timed out\n");
+      writeLog("IMU calibration timed out");
       break;
     }
   }
-  pros::delay(100); // small extra settle time after calibration reports done
+  pros::delay(200);
+  pros::lcd::set_text(2, " ");
 
-  // Initialize the chassis (important for odometry to work correctly)
+   int result = myAIVision5.enable_detection_types(pros::AivisionModeType::all);
+    printf("enable result: 0x%x, modes now: 0x%x\n", 
+           result, myAIVision5.get_enabled_detection_types());
+    writeLog("enable result: " + std::to_string(result) + ", modes now: " + std::to_string(myAIVision5.get_enabled_detection_types()) + "\n");
+
   chassis.calibrate();
-
-  myAIVision5.reset();
-  pros::delay(100);
-
-  myAIVision5.enable_detection_types(pros::AivisionModeType::tags);
-  myAIVision5.set_tag_family(pros::AivisionTagFamily::tag_61H11);
-
-  // Clear any existing log data
-  testData.clear();
 }
 
 /**
@@ -342,7 +398,7 @@ void opcontrol() {
 
       // Button A was just released — Prepare for test
       std::string errMsg = prepareForTest();
-      writeLog(errMsg + "\n");
+      writeLog(errMsg);
       pros::lcd::set_text(2, errMsg);
 
     } else if (master.get_digital_new_release(pros::E_CONTROLLER_DIGITAL_B)) {
@@ -351,7 +407,7 @@ void opcontrol() {
       left_motors.move(0);  // Stop
       right_motors.move(0); // Stop
 
-      writeLog("TEST END\n");
+      writeLog("TEST END");
       pros::lcd::set_text(2, "TEST ENDED");
 
     } else if (master.get_digital(pros::E_CONTROLLER_DIGITAL_B)) {
@@ -375,7 +431,7 @@ void opcontrol() {
 
         writeLog(getTimestamp() + ",TURN," + "," +
                  std::to_string(currentAngularVelocity) + "," +
-                 std::to_string(tag_heading) + "\n");
+                 std::to_string(tag_heading));
       }
     }
 

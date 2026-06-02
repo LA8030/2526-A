@@ -4,15 +4,15 @@
         {
             "label": "PROS Terminal",
             "type": "shell",
-            "command": "pros terminal",
+            "command": "\"${env:APPDATA}\\Code\\User\\globalStorage\\sigbots.pros\\install\\pros-cli-windows\\pros.exe\" terminal",
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated",
-                "clear": true
+                "clear": true,
+                "focus": true,
+                "close": false
             },
-            "runOptions": {
-                "runOn": "folderOpen"
-            }
+            "isBackground": true
         },
         {
             "label": "PROS Build",

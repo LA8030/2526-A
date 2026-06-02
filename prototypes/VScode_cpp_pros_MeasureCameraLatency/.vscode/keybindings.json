@@ -1,12 +1,14 @@
 [
     {
-        "key": "ctrl+shift+t",
+        "key": "ctrl+alt+p",
         "command": "workbench.action.tasks.runTask",
-        "args": "PROS Terminal"
+        "args": "PROS Terminal",
+        "when": "true"
     },
     {
         "key": "ctrl+shift+u",
         "command": "workbench.action.tasks.runTask",
-        "args": "PROS Upload"
+        "args": "PROS Upload",
+        "when": "true"
     }
 ]
