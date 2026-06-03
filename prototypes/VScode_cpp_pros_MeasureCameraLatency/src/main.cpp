@@ -8,9 +8,8 @@
 #include "lemlib/api.hpp"
 
 #include "pros/abstract_motor.hpp"
-#include <string>
 #include <cmath>
-
+#include <string>
 
 // Note:  If you see a lot of blue squigglys in the code below, they indicate
 //        failure to pass spell check
@@ -94,6 +93,7 @@ bool isReadyToTest = false;
 double initialHeadingToTag = 0.0;
 int prevLapCounter = 0;
 const double INVALID_HEADING = -999.0;
+double gyro_bias_at_rest = 0.0;
 
 /*******************************************************/
 // Test settings
@@ -145,6 +145,13 @@ void resetLog() {
   testData.clear(); // Clear the in-memory log data
 }
 
+// Compact timestamp in text form to include in log output
+std::string getTimestamp() {
+  auto ticks = std::chrono::steady_clock::now().time_since_epoch();
+  return std::to_string(
+      std::chrono::duration_cast<std::chrono::milliseconds>(ticks).count());
+}
+
 bool isImuValid() {
   // Check if still calibrating
   if (inertial_sensor.is_calibrating()) {
@@ -162,22 +169,6 @@ bool isImuValid() {
   }
 
   return true;
-}
-
-// Compact timestamp in text form to include in log output
-std::string getTimestamp() {
-  std::time_t now = std::time(nullptr);
-  std::tm *t = std::localtime(&now);
-
-  // Round minutes down to nearest 20
-  int roundedMin = (t->tm_min / 20) * 20;
-
-  std::ostringstream oss;
-  oss << std::put_time(t, "%H")                          // hour
-      << std::setw(2) << std::setfill('0') << roundedMin // rounded minutes
-      << std::put_time(t, "%S");                         // seconds
-
-  return oss.str(); // e.g. "153045" = 15:30:45
 }
 
 bool isAprilTag(pros::AIVision::Object obj) {
@@ -201,17 +192,15 @@ bool isTagID(pros::AIVision::Object obj, int target_id) {
 }
 
 double getAngleToTag(pros::AIVision::Object obj) {
-  // The AI Vision Sensor has 320x240 resolution, center at pixel 160.
-  // FOV can be measured empirically or estimated (~70 degrees horizontal
-  // is commonly reported for this sensor family — but calibrate yourself).
-  //
   // For a pinhole camera model:
   //   angle = atan2(pixel_offset, focal_length_in_pixels)
   //
   // focal_length_pixels = (image_width / 2) / tan(hFOV / 2)
-  // With hFOV = 70 deg: focal_length_pixels = 160 / tan(35 deg) ≈ 228.5
+  // With hFOV = 74.0 deg: focal_length_pixels = 160 / tan(37.0 deg) ≈ 228.5
 
-  const double HFOV_DEG = 70.0; // <-- tune this by measurement
+  const double HFOV_DEG =
+      74.0; // Source here:
+            // https://kb.vex.com/hc/en-us/articles/24173352365972-Comparing-the-AI-Vision-Sensor-to-the-V5-Vision-Sensor
   const int IMAGE_WIDTH = 320;
 
   double focalLengthPixels =
@@ -232,10 +221,14 @@ double getTagHeading(int target_id) {
   double tagHeading = INVALID_HEADING;
 
   int count = myAIVision5.get_object_count();
+  writeLog("Object count: " + std::to_string(count));
   if ((count > 0) && (count != PROS_ERR)) {
 
     for (int i = 0; i < count; i++) {
       pros::AIVision::Object obj = myAIVision5.get_object(i);
+
+      writeLog("    obj[" + std::to_string(i) + "]: type=" +
+               std::to_string(obj.type) + ", id=" + std::to_string(obj.id));
 
       if (isTagID(obj, tagIDToTrack)) {
         tagHeading = getAngleToTag(obj);
@@ -244,6 +237,28 @@ double getTagHeading(int target_id) {
     }
   }
   return tagHeading;
+}
+
+void saveDataToLog(std::string testName) {
+
+  double currentHeading = inertial_sensor.get_heading(); // 0-360
+  double gyroHeadingToTag = currentHeading - initialHeadingToTag;
+
+  pros::imu_gyro_s_t gyro = inertial_sensor.get_gyro_rate();
+  double currentAngularVelocity = gyro.z;
+
+  double tag_heading = getTagHeading(tagIDToTrack);
+
+  if (tag_heading == INVALID_HEADING) {
+    pros::lcd::set_text(2, "Tag not found");
+  } else {
+    pros::lcd::set_text(2, " ");
+    writeLog(testName + ", " + getTimestamp() + "," +
+             std::to_string(currentHeading) + "," +
+             std::to_string(currentAngularVelocity) + "," +
+             std::to_string(gyroHeadingToTag) + "," +
+             std::to_string(tag_heading));
+  }
 }
 
 std::string prepareForTest() {
@@ -276,18 +291,7 @@ void runTest() {
 
   left_motors.move(-1 * testSpeed);
   right_motors.move(testSpeed);
-
-  pros::imu_gyro_s_t gyro = inertial_sensor.get_gyro_rate();
-  double currentAngularVelocity = gyro.z;
-
-  double currentHeading = inertial_sensor.get_rotation();
-  double tag_heading = getTagHeading(tagIDToTrack);
-  double gyroHeadingToTag = currentHeading - initialHeadingToTag;
-
-  writeLog(getTimestamp() + "," + std::to_string(currentAngularVelocity) + "," +
-           std::to_string(gyroHeadingToTag) + "," +
-           std::to_string(tag_heading) + "," + std::to_string(currentHeading) +
-           "\n");
+  saveDataToLog("SPIN");
 }
 
 /*******************************************************/
@@ -304,18 +308,11 @@ void initialize() {
 
   testData.clear(); // Clear any old log data in memory
 
-  myAIVision5.reset();   // DO NOT call reset!  
-  //                           DO NOT enable tag detection!
-   // Use the VEXcode utility to set the camera up and then power cycle 
-  // the brain to ensure the camera is fully booted before the program starts.
-  // Calling reset() at this point will set the camera back to default settings, 
-  // and beieve me, I have tried every which way unsuccessfully to set the camera 
-  // up from here in code.  Better to rely on using VEXcode to enable tag detection.
-
-  // 2. Let the IMU calibrate (this long delay gives the camera plenty of time to reboot)
+  // 2. Let the IMU calibrate (this long delay gives the camera plenty of time
+  // to reboot)
   pros::lcd::set_text(2, "DO NOT MOVE THE ROBOT DURING GYRO CALIBRATION");
   inertial_sensor.reset();
-  int initCount = 500; 
+  int initCount = 500;
   while (inertial_sensor.is_calibrating()) {
     pros::delay(20);
     initCount--;
@@ -325,15 +322,25 @@ void initialize() {
       break;
     }
   }
-  pros::delay(200);
-  pros::lcd::set_text(2, " ");
-
-   int result = myAIVision5.enable_detection_types(pros::AivisionModeType::all);
-    printf("enable result: 0x%x, modes now: 0x%x\n", 
-           result, myAIVision5.get_enabled_detection_types());
-    writeLog("enable result: " + std::to_string(result) + ", modes now: " + std::to_string(myAIVision5.get_enabled_detection_types()) + "\n");
 
   chassis.calibrate();
+
+  pros::imu_gyro_s_t gyro = inertial_sensor.get_gyro_rate();
+  gyro_bias_at_rest = gyro.z;
+
+  pros::lcd::set_text(2, " ");
+
+  myAIVision5.reset();
+  pros::delay(
+      4000); // Extra delay to ensure camera has fully rebooted and is ready
+
+  myAIVision5.set_tag_family(pros::AivisionTagFamily::tag_61H11);
+
+  int result = myAIVision5.enable_detection_types(pros::AivisionModeType::all);
+  printf("enable result: 0x%x, modes now: 0x%x\n", result,
+         myAIVision5.get_enabled_detection_types());
+  writeLog("enable result: " + std::to_string(result) + ", modes now: " +
+           std::to_string(myAIVision5.get_enabled_detection_types()) + "\n");
 }
 
 /**
@@ -417,21 +424,15 @@ void opcontrol() {
 
     } else {
       // Arcade control scheme
-      int dir = master.get_analog(ANALOG_RIGHT_Y);  // forward/backward
+      int dir = master.get_analog(ANALOG_RIGHT_Y); // forward/backward
+      dir *= -1; // Invert Y axis so that up is positive voltage
       int turn = master.get_analog(ANALOG_RIGHT_X); // left/right
 
       left_motors.move(dir - turn);  // Sets left motor voltage
       right_motors.move(dir + turn); // Sets right motor voltage
 
       if (turn < -5) { // Push stick to the left for testing motion blur
-
-        pros::imu_gyro_s_t gyro = inertial_sensor.get_gyro_rate();
-        double currentAngularVelocity = gyro.z;
-        double tag_heading = getTagHeading(tagIDToTrack);
-
-        writeLog(getTimestamp() + ",TURN," + "," +
-                 std::to_string(currentAngularVelocity) + "," +
-                 std::to_string(tag_heading));
+        saveDataToLog("TURN");
       }
     }
 
