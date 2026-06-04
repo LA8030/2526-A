@@ -63,8 +63,8 @@ void runDriver() {
     button_left_arrow = controller_1.ButtonLeft.pressing();
     button_right_arrow = controller_1.ButtonRight.pressing();
 
-    // default tank drive or replace it with your preferred driver code here: 
-    driveChassis(ch3 * 0.12, ch2 * 0.12);
+    // Arcade drive, but with both on the right because my left joystick is sticky
+    driveChassis((-ch2 + ch1) * 0.12, (-ch2 - ch1) * 0.12);
 
     wait(10, msec); 
   }

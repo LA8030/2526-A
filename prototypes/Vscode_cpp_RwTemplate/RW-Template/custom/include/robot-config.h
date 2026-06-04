@@ -18,8 +18,6 @@ extern inertial inertial_sensor;
 
 extern vex::aivision aiCam;
 
-extern optical example_optical_sensor;
-extern distance example_distance_sensor;
 extern digital_out example_piston;
 extern rotation horizontal_tracker;
 extern rotation vertical_tracker;
@@ -29,15 +27,15 @@ extern distance right_sensor;
 extern distance back_sensor;
 
 extern motor arm_motor1;
-extern motor arm_motor2;
 extern motor_group arm_motor;
-extern motor intake_motor;
+extern motor claw_motor;
 extern digital_out claw;
 extern digital_out rush_arm;
 extern optical optical_sensor;
 extern distance intake_distance;
 extern distance clamp_distance;
 extern digital_out mogo_mech;
+extern motor intake_motor;
 
 // USER-CONFIGURABLE PARAMETERS (CHANGE BEFORE USING THIS TEMPLATE)
 extern double distance_between_wheels;
@@ -53,7 +51,7 @@ extern double vertical_tracker_dist_from_center;
 extern double horizontal_tracker_diameter;
 extern double vertical_tracker_diameter;
 
-//Distance Reset Setup
+// Distance Reset Setup
 extern double front_sensor_offsetX;
 extern double front_sensor_offsetY;
 extern double left_sensor_offsetX;
