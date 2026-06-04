@@ -20,7 +20,7 @@ Pose2D TagMap::whereAmI(int tagID, int pixelX, int pixelY, double tagWidth, doub
     Pose2D tagFieldCoords = getTagCoordinates(tagID);
 
     // Calculate the angle and distance to the tag using the camera data
-    double angleToTag = getAngleToTag(pixelX);
+    double angleToTag = getYawToTag(pixelX);
     double distanceToTag = getDistanceToTag(tagWidth, tagHeight);
 
     // Convert angle to radians for calculation
@@ -36,8 +36,8 @@ Pose2D TagMap::whereAmI(int tagID, int pixelX, int pixelY, double tagWidth, doub
 
 Pose2D TagMap::getTagCoordinates(int tagID)
 {
-    Pose2D retVal = Pose2D(0, 0, 0); 
-    retVal.invalidate(); 
+    Pose2D retVal = Pose2D(0, 0, 0);
+    retVal.invalidate();
 
     if ((tagID >= 1) &&
         (tagID < sizeof(OVERRIDE_TAG_MAP) / sizeof(Pose2D)))
@@ -47,7 +47,7 @@ Pose2D TagMap::getTagCoordinates(int tagID)
     return retVal;
 }
 
-double TagMap::getAngleToTag(int pixelX)
+double TagMap::getYawToTag(int pixelX)
 {
     // For a pinhole camera model:
     //   angle = atan2(pixel_offset, focal_length_in_pixels)

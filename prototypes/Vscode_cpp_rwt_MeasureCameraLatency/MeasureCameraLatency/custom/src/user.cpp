@@ -6,6 +6,7 @@
 
 #include "../include/Logger.hpp"
 #include "../include/Pose2D.hpp"
+#include "../include/TagMap.hpp"
 
 Logger myLogger;
 
@@ -20,7 +21,7 @@ const int testSpeed =
 double initialHeadingToTag = 0.0;
 double gyro_bias_at_rest = 0.0;
 
-double getAngleToTag(int tagID)
+double getYawToTag(int tagID)
 {
   double retVal = Pose2D::POSE2D_INVALID;
 
@@ -35,15 +36,18 @@ double getAngleToTag(int tagID)
       // Max detection range 24" so generally don't expect more than one tag in view at a time, but possible
       vex::aivision::object tag = aiCam.objects[i];
 
-      // Double check that this specific slot contains valid data
       if (tag.exists && (tag.id == tagID))
       {
-        retVal = tag.angle;
-        break;
+        retVal = TagMap::getYawToTag(tag.centerX);
       }
     }
   }
   return retVal;
+}
+
+std::string columnHeadersForLog()
+{
+  return "Test Name, Time (ms) Angular Velocity (deg/sec), Heading, Gyro Heading To Tag, Tag Angle";
 }
 
 void saveDataToLog(std::string testName)
@@ -51,16 +55,17 @@ void saveDataToLog(std::string testName)
   double currentHeading = inertial_sensor.angle(); // 0 to 360 degrees
   double gyroHeadingToTag = currentHeading - initialHeadingToTag;
 
-  double angularVelocity = inertial_sensor.gyroRate(zaxis, dps);
-
-  double tag_angle = getAngleToTag(tagIDToTrack);
+  double angularVelocity = inertial_sensor.gyroRate(vex::axisType::zaxis, vex::velocityUnits::dps);
+  double tag_angle = getYawToTag(tagIDToTrack);
 
   if (tag_angle == Pose2D::POSE2D_INVALID)
   {
+    myLogger.textToBrainLcd("Tag not found");
     myLogger.textToControllerLcd("Tag not found");
   }
   else
   {
+    myLogger.textToBrainLcd(" ");
     myLogger.textToControllerLcd(" ");
     myLogger.writeLog(testName + ", " + myLogger.getTimestamp() + "," +
                       myLogger.to_string(angularVelocity) + "," +
@@ -88,7 +93,7 @@ std::string prepareForTest()
   bool isReadyToTest = false;
   std::string errRet = " ";
 
-  double tagHeading = getAngleToTag(tagIDToTrack);
+  double tagHeading = getYawToTag(tagIDToTrack);
   if (tagHeading == Pose2D::POSE2D_INVALID)
   {
     errRet = "Tag not found. Make sure tag is visible to camera. ";
@@ -111,7 +116,7 @@ std::string prepareForTest()
 
   if (isReadyToTest)
   {
-    errRet = "READY TO TEST";
+    errRet = "Tag ID " + myLogger.to_string(tagIDToTrack) + " at " + myLogger.to_string(tagHeading) + " degrees";
   }
 
   return errRet;
@@ -214,6 +219,8 @@ void runDriver()
       // Button A was just released — Prepare for test
       std::string errMsg = prepareForTest();
       myLogger.writeLog(errMsg);
+      myLogger.writeLog(columnHeadersForLog());
+      myLogger.textToBrainLcd(errMsg);
       myLogger.textToControllerLcd(errMsg);
     }
     else if (just_released_button_B)
@@ -223,10 +230,12 @@ void runDriver()
       stopChassis(hold);
 
       myLogger.writeLog("TEST END");
+      myLogger.textToBrainLcd("TEST ENDED");
       myLogger.textToControllerLcd("TEST ENDED");
     }
     else if (button_b)
     {
+      saveDataToLog("FIXED SPEED");
 
       // Holding B button down - Spin Left at set speed
       driveChassis(-testSpeed, testSpeed);

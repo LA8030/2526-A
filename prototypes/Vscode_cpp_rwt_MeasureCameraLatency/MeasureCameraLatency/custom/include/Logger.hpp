@@ -12,9 +12,11 @@ public:
 
     void writeLog(std::string data);
     void dumpLogToTerminal();
+    void textToBrainLcd(std::string msg);
     void textToControllerLcd(std::string msg);
     void resetLog();
     std::string getTimestamp();   
+    std::string to_string(int i);
     std::string to_string(double d);
 
 private:

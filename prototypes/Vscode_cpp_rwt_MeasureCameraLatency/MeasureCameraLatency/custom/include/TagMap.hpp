@@ -11,8 +11,7 @@ public:
 
     Pose2D whereAmI(int tagID, int pixelX, int pixelY, double tagWidth, double tagHeight, double gyroHeading);
 
-private:
     Pose2D getTagCoordinates(int tagID);
-    double getAngleToTag(int pixelX);
-    double getDistanceToTag(double tagWidth, double tagHeight);
+    static double getYawToTag(int tagID);
+    static double getDistanceToTag(double tagWidth, double tagHeight);
 };

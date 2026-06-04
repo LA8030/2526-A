@@ -28,6 +28,13 @@ void Logger::dumpLogToTerminal()
   }
 }
 
+void Logger::textToBrainLcd(std::string msg)
+{
+  Brain.Screen.clearScreen();
+  Brain.Screen.setCursor(1, 1); // row 1, column 1
+  Brain.Screen.print(msg.c_str());
+}
+
 void Logger::textToControllerLcd(std::string msg)
 {
   controller_1.Screen.clearScreen();
@@ -84,6 +91,13 @@ std::string Logger::getTimestamp()
   char buf[32];
   snprintf(buf, sizeof(buf), "%u", (unsigned int)Brain.timer(timeUnits::msec));
   return std::string(buf);
+}
+
+std::string Logger::to_string(int i)
+{
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%d", i);
+  return buf;
 }
 
 std::string Logger::to_string(double d)
